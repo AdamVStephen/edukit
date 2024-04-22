@@ -1,0 +1,12 @@
+0-->initialization, reset all parameters and geneerators
+1-->reading positions (both encoder and rotor/motor/actuator)
+	possible response:  
+2-->setting position:
+	2, pos_val
+3-->reading status 
+	possible response: 0 --> all is well
+					   1 --> overflow error
+					   
+					   
+Examples:
+	
