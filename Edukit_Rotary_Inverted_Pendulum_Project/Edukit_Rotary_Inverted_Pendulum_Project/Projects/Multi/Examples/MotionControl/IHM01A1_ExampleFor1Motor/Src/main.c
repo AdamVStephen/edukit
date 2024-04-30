@@ -183,10 +183,13 @@ L6474_Init_t gL6474InitParams = {
 #pragma pack(push, 1)
  typedef struct
  {
- 	uint32_t positionRotor;
- 	uint32_t positionEncoder;
+ 	int positionRotor;
+ 	int positionEncoder;
  	uint32_t  Pwm1Counter;
  	uint32_t CYCCNT;
+ 	int LOOP_BACK_rotor_control_target_steps;
+ 	uint32_t LOOP_BACK_L6474_Board_Pwm1Period;
+ 	uint8_t  LOOP_BACK_gpioState;
 
  } DataFrame;
 #pragma pack(pop)
@@ -194,9 +197,9 @@ L6474_Init_t gL6474InitParams = {
  #pragma pack(push, 1)
  typedef struct
  {
-	float control_target_steps;
-	uint8_t gpioState;
+	int control_target_steps;
 	uint32_t Pwm1Period;
+	uint8_t gpioState;
  } tt, *DataFrameReceive;
 #pragma pack(pop)
 
@@ -385,6 +388,10 @@ uint8_t RxBuffer[UART_RX_BUFFER_SIZE];
 uint16_t Extract_Msg(uint8_t *CircularBuff, uint16_t StartPos, uint16_t LastPos,
 		uint16_t BufMaxLen, T_Serial_Msg *Msg);
 
+
+DataFrameReceive rx_frame;
+uint8_t rx_frameBuffer[sizeof(*rx_frame)];
+
 /* Acceleration control system variables */
 volatile uint32_t apply_acc_start_time;
 volatile uint32_t clock_int_time;
@@ -400,7 +407,7 @@ int32_t enable_speed_prescale;
 /* System data reporting */
 char tmp_string[256];
 char msg[192];
-char msg_cmd[16]; //256
+char msg_cmd[25]; //256
 char msg_pad[64];
 char test_msg[128];
 
@@ -795,6 +802,11 @@ uint32_t RxBuffer_ReadIdx;
 uint32_t RxBuffer_WriteIdx;
 uint32_t readBytes;
 
+int    LOOP_BACK_rotor_control_target_steps;
+uint8_t  LOOP_BACK_gpioState;
+uint32_t LOOP_BACK_L6474_Board_Pwm1Period;
+
+
 void initialize(){
 	/* Initialize reset state indicating that reset has occurred */
 
@@ -815,6 +827,12 @@ void initialize(){
 	desired_pwm_period = 0;
 	current_pwm_period = 0;
 	target_velocity_prescaled = 0;
+
+
+	LOOP_BACK_rotor_control_target_steps=0;
+	LOOP_BACK_gpioState=0;
+	LOOP_BACK_L6474_Board_Pwm1Period=0;
+
 
 	/* Initialize default start mode and reporting mode */
 	mode_index = 1;
@@ -2814,7 +2832,7 @@ int main(void) {
 			}
 
 			ProcessGAMOutput();
-			SendGAMInput( COMMAND_INDEX_SEND_GAMInput );
+			SendGAMInputMain( );
 
 			if( !setControlCycle() ) break;
 ;
@@ -6181,7 +6199,7 @@ void interactive_rotor_actuator_control(void){
 
 
 
-void SendGAMInput( int type ){
+void SendGAMInput(  ){
 
 //	switch( type ){
 //		case COMMAND_INDEX_SEND_STATUS_ERROR: //status message
@@ -6209,6 +6227,12 @@ void SendGAMInput( int type ){
 //			break;
 //	}
 
+	//ret = HAL_UART_Transmit(&huart2, (uint8_t*) msg_cmd, sizeof(frame), HAL_MAX_DELAY);
+
+}
+
+
+void SendGAMInputMain(  ){
 	ret = rotor_position_read(&rotor_position_steps);
 	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
 	if (select_suspended_mode == 0) {
@@ -6228,15 +6252,17 @@ void SendGAMInput( int type ){
 		rotor_position_steps,
 		encoder_position_steps,
 		pwm_count,
-		apply_acc_start_time
+		apply_acc_start_time,
+		LOOP_BACK_rotor_control_target_steps,
+		LOOP_BACK_L6474_Board_Pwm1Period,
+		LOOP_BACK_gpioState
 	};
 
-	memcpy(msg_cmd, &frame, 16 );
+	memcpy(msg_cmd, &frame, sizeof(frame) );
 
-	ret = HAL_UART_Transmit(&huart2, (uint8_t*) msg_cmd, 16, HAL_MAX_DELAY);
+	ret = HAL_UART_Transmit(&huart2, (uint8_t*) msg_cmd, sizeof(frame), HAL_MAX_DELAY);
 
 }
-
 /*
  *Jawad Modification ======== ########################
  *ProcessCommand
@@ -6271,7 +6297,44 @@ void HandleGAMOutput(char * outputStr){
 }
 
 
+/*
+ * Single integer value read
+ */
 
+int read_Frame() {
+
+	int k;
+
+	/* Number of bytes to be analyzed */
+	uint16_t NumNewByte = 0;
+
+	RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
+	uint16_t LastPos  = RxBuffer_WriteIdx;
+	uint16_t StartPos = RxBuffer_ReadIdx;
+
+	/* Two index for ByteStuffing process  */
+	uint16_t BuffIdx;
+
+	if (LastPos >= StartPos) {
+		NumNewByte = LastPos - StartPos;
+	} else {
+		NumNewByte = UART_RX_BUFFER_SIZE + LastPos - StartPos;
+	}
+
+	if( NumNewByte < sizeof(*rx_frame) ) return 0;
+
+	NumNewByte = sizeof(*rx_frame);
+
+	BuffIdx = StartPos;
+
+	memcpy(rx_frameBuffer, RxBuffer+StartPos, NumNewByte );
+	rx_frame = (DataFrameReceive)rx_frameBuffer;
+
+	RxBuffer_ReadIdx = (RxBuffer_ReadIdx + NumNewByte) % UART_RX_BUFFER_SIZE;
+
+	return 1;
+
+}
 
 /*
  *Jawad Modification ======== ########################
@@ -6279,22 +6342,10 @@ void HandleGAMOutput(char * outputStr){
  */
 void ProcessGAMOutput( void ){
 
-	RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
 
-	readBytes = Extract_Msg(RxBuffer, RxBuffer_ReadIdx, RxBuffer_WriteIdx, UART_RX_BUFFER_SIZE, &Msg);
-
-	if (readBytes) // Message found
+	if ( read_Frame() ) // Message found
 	{
-		RxBuffer_ReadIdx = (RxBuffer_ReadIdx + readBytes) % UART_RX_BUFFER_SIZE;
 
-
-//		char* cmd = strtok((char*)Msg.Data, COMMAND_END);
-//		while( cmd != NULL ) {
-//		  HandleGAMOutput( cmd );
-//		  cmd = strtok(NULL, " ");
-//		}
-
-		DataFrameReceive rx_frame = (DataFrameReceive)Msg.Data;
 		if( rx_frame->control_target_steps == 0 )
 			L6474_Board_Pwm1SetPeriod(rx_frame->Pwm1Period);
 		else
@@ -6302,6 +6353,10 @@ void ProcessGAMOutput( void ){
 
 		if( rx_frame->gpioState != UNKNOW_DIR )
 			L6474_Board_SetDirectionGpio(0, rx_frame->gpioState);
+
+		LOOP_BACK_rotor_control_target_steps = rx_frame->control_target_steps;
+		LOOP_BACK_gpioState = rx_frame->gpioState;
+		LOOP_BACK_L6474_Board_Pwm1Period = rx_frame->Pwm1Period;
 
 	}
 }
