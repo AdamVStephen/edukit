@@ -438,7 +438,7 @@
  * UART DMA definitions
  */
 
-#define UART_RX_BUFFER_SIZE 	(200)
+#define UART_RX_BUFFER_SIZE 	(198)
 #define SERIAL_MSG_MAXLEN 		(100)
 #define SERIAL_MSG_EOF          '\r'
 
