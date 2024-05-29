@@ -233,7 +233,7 @@ L6474_Init_t gL6474InitParams = {
  */
 
 #define ACCEL_CONTROL_DATA 0		// Set to 1 for display of timing data
-#define ACCEL_CONTROL 0 			// Set to 1 to enable acceleration control. Set to 0 to use position target control.
+#define ACCEL_CONTROL 1 			// Set to 1 to enable acceleration control. Set to 0 to use position target control.
 #define PWM_COUNT_SAFETY_MARGIN 2
 #define MAXIMUM_ACCELERATION 131071
 #define MAXIMUM_DECELERATION 131071
@@ -246,7 +246,7 @@ void Error_Handler(uint16_t error);
 void read_int(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, int * int_return);
 void read_char(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, char * char_return);
 void select_mode_1(void);
-void user_configuration(void);
+void set_default_configurations(void);
 void Main_StepClockHandler();
 void apply_acceleration(float * acc, float* target_velocity_prescaled, float t_sample);
 
@@ -470,13 +470,6 @@ int cycle_period_start;
 int cycle_period_sum;
 int enable_cycle_delay_warning;
 
-/* PID control variables */
-float *deriv_lp_corner_f;
-float *deriv_lp_corner_f_rotor;
-float proportional, rotor_p_gain;
-float integral, rotor_i_gain;
-float derivative, rotor_d_gain;
-
 /* State Feedback variables */
 int enable_state_feedback;
 float integral_compensator_gain;
@@ -513,16 +506,6 @@ float fo_r, Wo_r, IWon_r, iir_0_r, iir_1_r, iir_2_r;
 /* Encoder position variables */
 uint32_t cnt3;
 int range_error;
-float encoder_position;
-int encoder_position_steps;
-int encoder_position_init;
-int previous_encoder_position;
-int max_encoder_position;
-int global_max_encoder_position;
-int prev_global_max_encoder_position;
-int encoder_position_down;
-int encoder_position_curr;
-int encoder_position_prev;
 
 /* Angle calibration variables */
 float encoder_position_offset;
@@ -542,9 +525,6 @@ int angle_cal_complete;
 /* Swing Up system variables */
 int enable_swing_up;
 int enable_swing_up_resp;
-bool peaked;
-bool handled_peak;
-int zero_crossed;
 motorDir_t swing_up_direction;
 int swing_up_state, swing_up_state_prev;
 int stage_count;
@@ -563,11 +543,6 @@ int init_enable_noise_rejection_step;
 int init_enable_rotor_plant_design;
 int init_enable_rotor_plant_gain_design;
 
-/* Low pass filter variables */
-float fo, Wo, IWon, iir_0, iir_1, iir_2;
-float fo_LT, Wo_LT, IWon_LT;
-float iir_LT_0, iir_LT_1, iir_LT_2;
-float fo_s, Wo_s, IWon_s, iir_0_s, iir_1_s, iir_2_s;
 
 /* Slope correction system variables */
 int slope;
@@ -637,14 +612,6 @@ uint16_t current_speed;
 /*Pendulum system ID variable */
 int enable_pendulum_sysid_test;
 
-/* Full system identification variables */
-int enable_full_sysid;
-float full_sysid_max_vel_amplitude_deg_per_s;
-float full_sysid_min_freq_hz;
-float full_sysid_max_freq_hz;
-int full_sysid_num_freqs;
-float full_sysid_freq_log_step;
-int full_sysid_start_index;
 
 /* Rotor comb drive system variables */
 int enable_rotor_tracking_comb_signal;
@@ -684,23 +651,6 @@ int speed_governor;
  * User selection mode values
  */
 
-int mode_1;				// Enable LQR Motor Model M
-int mode_2;				// Enable LRR Motor Model H
-int mode_3;				// Enable LQR Motor Model L
-int mode_4;				// Enable Suspended Mode Motor Model M
-int mode_5;				// Enable sin drive track signal
-int mode_adaptive_off;	// Disable adaptive control
-int mode_adaptive;		// Enable adaptive control
-int mode_8;				// Enable custom configuration entry
-int mode_9;				// Disable sin drive track signal
-int mode_10;			// Enable Single PID Mode with Motor Model M
-int mode_11;			// Enable rotor actuator and encoder test mode
-int mode_13;			// Enable rotor control system evaluation
-int mode_15;			// Enable interactive control of rotor actuator
-int mode_16;			// Enable load disturbance function step mode
-int mode_17;			// Enable noise disturbance function step mode
-int mode_18;			// Enable sensitivity function step mode
-int mode_19;            // Enable full system identification mode
 int mode_quit;			// Initiate exit from control loop
 int mode_interactive;	// Enable continued terminal interactive user session
 int mode_index_prev, mode_index_command;
@@ -708,110 +658,6 @@ int mode_transition_tick;
 int mode_transition_state;
 int transition_to_adaptive_mode;
 
-
-/*
- * Real time user input characters
- */
-
-char mode_string_stop[UART_RX_BUFFER_SIZE];
-char mode_string_mode_1[UART_RX_BUFFER_SIZE];
-char mode_string_mode_2[UART_RX_BUFFER_SIZE];
-char mode_string_mode_3[UART_RX_BUFFER_SIZE];
-char mode_string_mode_4[UART_RX_BUFFER_SIZE];
-char mode_string_mode_8[UART_RX_BUFFER_SIZE];
-char mode_string_mode_5[UART_RX_BUFFER_SIZE];
-char mode_string_inc_accel[UART_RX_BUFFER_SIZE];
-char mode_string_dec_accel[UART_RX_BUFFER_SIZE];
-char mode_string_inc_amp[UART_RX_BUFFER_SIZE];
-char mode_string_dec_amp[UART_RX_BUFFER_SIZE];
-char mode_string_mode_single_pid[UART_RX_BUFFER_SIZE];
-char mode_string_mode_test[UART_RX_BUFFER_SIZE];
-char mode_string_mode_control[UART_RX_BUFFER_SIZE];
-char mode_string_mode_motor_characterization_mode[UART_RX_BUFFER_SIZE];
-char mode_string_mode_load_dist[UART_RX_BUFFER_SIZE];
-char mode_string_mode_load_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_mode_noise_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_mode_plant_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_mode_full_sysid[UART_RX_BUFFER_SIZE];
-char mode_string_dec_pend_p[UART_RX_BUFFER_SIZE];
-char mode_string_inc_pend_p[UART_RX_BUFFER_SIZE];
-char mode_string_dec_pend_i[UART_RX_BUFFER_SIZE];
-char mode_string_inc_pend_i[UART_RX_BUFFER_SIZE];
-char mode_string_dec_pend_d[UART_RX_BUFFER_SIZE];
-char mode_string_inc_pend_d[UART_RX_BUFFER_SIZE];
-char mode_string_dec_rotor_p[UART_RX_BUFFER_SIZE];
-char mode_string_inc_rotor_p[UART_RX_BUFFER_SIZE];
-char mode_string_dec_rotor_i[UART_RX_BUFFER_SIZE];
-char mode_string_inc_rotor_i[UART_RX_BUFFER_SIZE];
-char mode_string_dec_rotor_d[UART_RX_BUFFER_SIZE];
-char mode_string_inc_rotor_d[UART_RX_BUFFER_SIZE];
-char mode_string_dec_torq_c[UART_RX_BUFFER_SIZE];
-char mode_string_inc_torq_c[UART_RX_BUFFER_SIZE];
-
-//###########**********New Commands*********************************
-char mode_string_inc_torq_UP[UART_RX_BUFFER_SIZE];
-//##################################################################
-
-char mode_string_dec_max_s[UART_RX_BUFFER_SIZE];
-char mode_string_inc_max_s[UART_RX_BUFFER_SIZE];
-char mode_string_dec_min_s[UART_RX_BUFFER_SIZE];
-char mode_string_inc_min_s[UART_RX_BUFFER_SIZE];
-char mode_string_dec_max_a[UART_RX_BUFFER_SIZE];
-char mode_string_inc_max_a[UART_RX_BUFFER_SIZE];
-char mode_string_dec_max_d[UART_RX_BUFFER_SIZE];
-char mode_string_inc_max_d[UART_RX_BUFFER_SIZE];
-char mode_string_enable_step[UART_RX_BUFFER_SIZE];
-char mode_string_disable_step[UART_RX_BUFFER_SIZE];
-char mode_string_enable_pendulum_impulse[UART_RX_BUFFER_SIZE];
-char mode_string_disable_pendulum_impulse[UART_RX_BUFFER_SIZE];
-char mode_string_enable_load_dist[UART_RX_BUFFER_SIZE];
-char mode_string_disable_load_dist[UART_RX_BUFFER_SIZE];
-char mode_string_enable_noise_rej_step[UART_RX_BUFFER_SIZE];
-char mode_string_disable_noise_rej_step[UART_RX_BUFFER_SIZE];
-char mode_string_disable_sensitivity_fnc_step[UART_RX_BUFFER_SIZE];
-char mode_string_enable_sensitivity_fnc_step[UART_RX_BUFFER_SIZE];
-char mode_string_inc_step_size[UART_RX_BUFFER_SIZE];
-char mode_string_dec_step_size[UART_RX_BUFFER_SIZE];
-char mode_string_select_mode_5[UART_RX_BUFFER_SIZE];
-char mode_string_enable_high_speed_sampling[UART_RX_BUFFER_SIZE];
-char mode_string_disable_high_speed_sampling[UART_RX_BUFFER_SIZE];
-char mode_string_enable_speed_prescale[UART_RX_BUFFER_SIZE];
-char mode_string_disable_speed_prescale[UART_RX_BUFFER_SIZE];
-char mode_string_disable_speed_governor[UART_RX_BUFFER_SIZE];
-char mode_string_enable_speed_governor[UART_RX_BUFFER_SIZE];
-char mode_string_reset_system[UART_RX_BUFFER_SIZE];
-
-
-int char_mode_select;	// Flag detecting whether character mode select entered
-
-
-char message_received[UART_RX_BUFFER_SIZE];
-char mode_string_mode_1[UART_RX_BUFFER_SIZE];
-char mode_string_mode_2[UART_RX_BUFFER_SIZE];
-char mode_string_mode_3[UART_RX_BUFFER_SIZE];
-char mode_string_mode_4[UART_RX_BUFFER_SIZE];
-char mode_string_mode_5[UART_RX_BUFFER_SIZE];
-char mode_string_mode_8[UART_RX_BUFFER_SIZE];
-char mode_string_mode_single_pid[UART_RX_BUFFER_SIZE];
-char mode_string_mode_test[UART_RX_BUFFER_SIZE];
-char mode_string_mode_control[UART_RX_BUFFER_SIZE];
-char mode_string_mode_high_speed_test[UART_RX_BUFFER_SIZE];
-char mode_string_mode_motor_characterization_mode[UART_RX_BUFFER_SIZE];
-char mode_string_mode_pendulum_sysid_test[UART_RX_BUFFER_SIZE];
-char mode_string_dec_accel[UART_RX_BUFFER_SIZE];
-char mode_string_inc_accel[UART_RX_BUFFER_SIZE];
-char mode_string_inc_amp[UART_RX_BUFFER_SIZE];
-char mode_string_dec_amp[UART_RX_BUFFER_SIZE];
-char mode_string_mode_load_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_mode_noise_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_mode_plant_dist_step[UART_RX_BUFFER_SIZE];
-char mode_string_stop[UART_RX_BUFFER_SIZE];
-
-/* CMSIS Variables */
-arm_pid_instance_a_f32 PID_Pend, PID_Rotor;
-float Deriv_Filt_Pend[2];
-float Deriv_Filt_Rotor[2];
-float Wo_t, fo_t, IWon_t;
 
 /* System timing variables */
 
@@ -879,12 +725,6 @@ void initialize(){
 	RxBuffer_WriteIdx = 0;
 	readBytes = 0;
 
-	/*Initialize encoder variables */
-	encoder_position = 0;
-	encoder_position_down = 0;
-	encoder_position_curr = 0;
-	encoder_position_prev = 0;
-	angle_scale = ENCODER_READ_ANGLE_SCALE;
 
 	/*Initialize rotor control variables */
 	rotor_control_target_steps = 0;
@@ -925,9 +765,6 @@ void initialize(){
 	mode_transition_state = 0;
 	transition_to_adaptive_mode = 0;
 
-	/*Initialize user interactive mode */
-	char_mode_select = 0;
-
 	/* STM32xx HAL library initialization */
 	HAL_Init();
 
@@ -960,7 +797,6 @@ void initialize(){
 	MX_TIM3_Init();
 
 	/* Initialize Pendulum Angle Encoder offset */
-	encoder_position_init = 0;
 	HAL_Delay(10);
 	/* Initialize UART communication port */
 	MX_USART2_UART_Init();
@@ -999,13 +835,6 @@ void initialize(){
 	torq_current_val = MAX_TORQUE_CONFIG;
 	L6474_SetAnalogValue(0, L6474_TVAL, torq_current_val);
 
-	/* Default controller gains */
-	proportional = PRIMARY_PROPORTIONAL_MODE_1;
-	integral = PRIMARY_INTEGRAL_MODE_1;
-	derivative = PRIMARY_DERIVATIVE_MODE_1;
-	rotor_p_gain = SECONDARY_PROPORTIONAL_MODE_1;
-	rotor_i_gain = SECONDARY_INTEGRAL_MODE_1;
-	rotor_d_gain = SECONDARY_DERIVATIVE_MODE_1;
 
 	/* Enable State Feedback mode and Integral Action Compensator by default and set
 	 * precompensation factor to unity
@@ -1031,55 +860,6 @@ void initialize(){
 	/* Encoder initialization */
 	HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
-	/* Assign user interaction mode string values */
-	//set_mode_strings();
-
-	/* Controller structure and variable allocation */
-//	current_error_steps = malloc(sizeof(float));
-//	if (current_error_steps == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//	current_error_rotor_steps = malloc(sizeof(float));
-//	if (current_error_rotor_steps == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//	sample_period = malloc(sizeof(float));
-//	if (sample_period == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//	deriv_lp_corner_f = malloc(sizeof(float));
-//	if (sample_period == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//	deriv_lp_corner_f_rotor = malloc(sizeof(float));
-//	if (sample_period == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//	sample_period_rotor = malloc(sizeof(float));
-//	if (sample_period == NULL) {
-//		sprintf(test_msg, "Memory allocation error\r\n");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg),
-//				HAL_MAX_DELAY);
-//	}
-//
-//	if (RCC_SYS_CLOCK_FREQ != HAL_RCC_GetSysClockFreq()) {
-//		sprintf(test_msg, "RCC_SYS_CLOCK_FREQ not equal to HAL_RCC_GetSysClockFreq() (%lu). Exiting.\r\n", HAL_RCC_GetSysClockFreq());
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg), HAL_MAX_DELAY);
-//	}
-//	if (RCC_HCLK_FREQ != HAL_RCC_GetHCLKFreq()) {
-//		sprintf(test_msg, "RCC_HCLK_FREQ not equal to HAL_RCC_GetHCLKFreq() (%lu). Exiting.\r\n", HAL_RCC_GetHCLKFreq());
-//		HAL_UART_Transmit(&huart2, (uint8_t*) test_msg, strlen(test_msg), HAL_MAX_DELAY);
-//	}
 //
 //	/* Configure controller filter and sample time parameters */
 //	*deriv_lp_corner_f = DERIVATIVE_LOW_PASS_CORNER_FREQUENCY;
@@ -1090,70 +870,6 @@ void initialize(){
 	Tsample_rotor = Tsample;
 	*sample_period_rotor = Tsample_rotor;
 
-	/* PID Derivative Low Pass Filter Coefficients */
-
-//	fo_t = DERIVATIVE_LOW_PASS_CORNER_FREQUENCY;
-//	Wo_t = 2 * 3.141592654 * fo_t;
-//	IWon_t = 2 / (Wo_t * (*sample_period));
-//	Deriv_Filt_Pend[0] = 1 / (1 + IWon_t);
-//	Deriv_Filt_Pend[1] = Deriv_Filt_Pend[0] * (1 - IWon_t);
-//
-//	fo_t = DERIVATIVE_LOW_PASS_CORNER_FREQUENCY_ROTOR;
-//	Wo_t = 2 * 3.141592654 * fo_t;
-//	IWon_t = 2 / (Wo_t * (*sample_period));
-//	Deriv_Filt_Rotor[0] = 1 / (1 + IWon_t);
-//	Deriv_Filt_Rotor[1] = Deriv_Filt_Rotor[0] * (1 - IWon_t);
-//
-//	/* Initialize real time clock */
-//	assert(RCC_SYS_CLOCK_FREQ == HAL_RCC_GetSysClockFreq());
-//	assert(RCC_HCLK_FREQ == HAL_RCC_GetHCLKFreq());
-//
-//	/* Configure primary controller parameters */
-//	windup = PRIMARY_WINDUP_LIMIT;
-//
-//	/* Configure secondary Rotor controller parameters */
-//	rotor_windup = SECONDARY_WINDUP_LIMIT;
-//
-//	/* Compute Low Pass Filter Coefficients for Rotor Position filter and Encoder Angle Slope Correction */
-//	fo = LP_CORNER_FREQ_ROTOR;
-//	Wo = 2 * 3.141592654 * fo;
-//	IWon = 2 / (Wo * Tsample);
-//	iir_0 = 1 / (1 + IWon);
-//	iir_1 = iir_0;
-//	iir_2 = iir_0 * (1 - IWon);
-//	fo_s = LP_CORNER_FREQ_STEP;
-//	Wo_s = 2 * 3.141592654 * fo_s;
-//	IWon_s = 2 / (Wo_s * Tsample);
-//	iir_0_s = 1 / (1 + IWon_s);
-//	iir_1_s = iir_0_s;
-//	iir_2_s = iir_0_s * (1 - IWon_s);
-//	fo_LT = LP_CORNER_FREQ_LONG_TERM;
-//	Wo_LT = 2 * 3.141592654 * fo_LT;
-//	IWon_LT = 2 / (Wo_LT * Tsample);
-//	iir_LT_0 = 1 / (1 + IWon_LT);
-//	iir_LT_1 = iir_LT_0;
-//	iir_LT_2 = iir_LT_0 * (1 - IWon_LT);
-
-	/*
-	 * Primary Controller Mode Configuration Loop
-	 *
-	 * Outer Loop acquires configuration command
-	 * Inner Loop includes control system
-	 * Inner Loop exits to Outer Loop upon command or exceedance
-	 * of rotor or pendulum angles
-	 *
-	 * Outer Loop provided user-selected system reset option during
-	 * data entry by Serial Interface
-	 *
-	 */
-
-
-//	tick_read_cycle_start = HAL_GetTick();
-//	sprintf(msg, "\n\rSystem Starting Prepare to Enter Mode Selection... ");
-//	HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-	/*
-	 * Request user input for mode configuration
-	 */
 
 	enable_adaptive_mode = ENABLE_ADAPTIVE_MODE;
 	adaptive_threshold_low = ADAPTIVE_THRESHOLD_LOW;
@@ -1175,37 +891,11 @@ void initialize_main_loop(){
 	LOOP_BACK_state = 0;
 
 	mode_interactive = 0;
-	//user_prompt();
 
-	/*
-	 * If user has responded to previous query for configuration, then system remains in interactive mode
-	 * and default state is not automatically enabled
-	 */
-
-
-//		if (mode_interactive == 0) {
-//			sprintf(msg, "\n\rEnter Mode Selection Now or System Will Start in Default Mode in 5 Seconds..: ");
-//			HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//		}
-
-	/*
-	 * If user has responded to query for configuration, then system remains in interactive mode
-	 * and default state is not automatically enabled
-	 */
-
-//		if (mode_interactive == 1) {
-//			sprintf(msg, "\n\rEnter Mode Selection Now: \n\r");
-//			HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//		}
-
-	/* Flush read buffer  */
-//	for (k = 0; k < SERIAL_MSG_MAXLEN; k++) {
-//		Msg.Data[k] = 0;
-//	}
 	/* Start timer for configuration command read loop */
 	tick_read_cycle_start = HAL_GetTick();
 	/* Configuration command read loop */
-	user_configuration();
+	set_default_configurations();
 
 	/* Set Motor Speed Profile and torque current */
 	BSP_MotorControl_SoftStop(0);
@@ -1215,130 +905,6 @@ void initialize_main_loop(){
 	BSP_MotorControl_SetMinSpeed(0, min_speed);
 	BSP_MotorControl_SetAcceleration(0, MAX_ACCEL);
 	BSP_MotorControl_SetDeceleration(0, MAX_DECEL);
-
-	/* Report configuration values */
-//		if (ACCEL_CONTROL == 0){
-//			sprintf(msg, "\n\rMotor Profile Speeds Set at Min %u Max %u Steps per Second", min_speed, max_speed);
-//			HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//		}
-//		if (select_suspended_mode == 0){
-//			sprintf(msg, "\n\rInverted Pendulum Mode Selected");
-//			HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//		}
-//		if (select_suspended_mode == 1){
-//		sprintf(msg, "\n\rSuspended Pendulum Mode Selected");
-//		HAL_UART_Transmit(&huart2, (uint8_t*) msg,
-//				strlen(msg), HAL_MAX_DELAY);
-//			}
-//
-//		sprintf(msg, "\n\rMotor Torque Current Set at %0.1f mA",
-//				torq_current_val);
-//		HAL_UART_Transmit(&huart2, (uint8_t*) msg,
-//				strlen(msg), HAL_MAX_DELAY);
-
-//	/* Motor Control Characterization Test*/
-//	if (enable_motor_actuator_characterization_mode == 1) {
-//		motor_actuator_characterization_mode();
-//	}
-//	/* Interactive digital motor control system */
-//	if (enable_rotor_actuator_control == 1) {
-//		interactive_rotor_actuator_control();
-//	}
-
-	/*
-	 * 	Rotor and Encoder Test Sequence will execute by moving rotor and reportin angle values
-	 * 	as well as requesting pendulum motion followed by reporting of pendulum angles
-	 *
-	 * 	Agreement between actions and reported values confirms proper installation of actuator
-	 * 	and pendulum encoder.
-	 *
-	 */
-
-//		if (enable_rotor_actuator_test == 1) {
-//			rotor_encoder_test();
-//		}
-
-	/*
-	 * Configure Primary and Secondary PID controller data structures
-	 * Scale by CONTROLLER_GAIN_SCALE set to default value of unity
-	 */
-
-
-//		PID_Pend.Kp = proportional * CONTROLLER_GAIN_SCALE;
-//		PID_Pend.Ki = integral * CONTROLLER_GAIN_SCALE;
-//		PID_Pend.Kd = derivative * CONTROLLER_GAIN_SCALE;
-//
-//		PID_Rotor.Kp = rotor_p_gain * CONTROLLER_GAIN_SCALE;
-//		PID_Rotor.Ki = rotor_i_gain * CONTROLLER_GAIN_SCALE;
-//		PID_Rotor.Kd = rotor_d_gain * CONTROLLER_GAIN_SCALE;
-//
-//		PID_Pend.Kp = proportional * CONTROLLER_GAIN_SCALE;
-//		PID_Pend.Ki = integral * CONTROLLER_GAIN_SCALE;
-//		PID_Pend.Kd = derivative * CONTROLLER_GAIN_SCALE;
-//
-//		PID_Rotor.Kp = rotor_p_gain * CONTROLLER_GAIN_SCALE;
-//		PID_Rotor.Ki = rotor_i_gain * CONTROLLER_GAIN_SCALE;
-//		PID_Rotor.Kd = rotor_d_gain * CONTROLLER_GAIN_SCALE;
-//
-//		PID_Pend.state_a[0] = 0;
-//		PID_Pend.state_a[1] = 0;
-//		PID_Pend.state_a[2] = 0;
-//		PID_Pend.state_a[3] = 0;
-//
-//		PID_Rotor.state_a[0] = 0;
-//		PID_Rotor.state_a[1] = 0;
-//		PID_Rotor.state_a[2] = 0;
-//		PID_Rotor.state_a[3] = 0;
-//
-//		integral_compensator_gain = integral_compensator_gain * CONTROLLER_GAIN_SCALE;
-
-	/* Assign Rotor Plant Design variable values */
-
-
-	/* Transfer function model of form 1/(s^2 + 2*Damping_Coefficient*Wn*s + Wn^2) */
-//		if (rotor_damping_coefficient != 0 || rotor_natural_frequency != 0){
-//			Wn2 = rotor_natural_frequency * rotor_natural_frequency;
-//			rotor_plant_gain = rotor_plant_gain * Wn2;
-//			ao = ((2.0F/Tsample)*(2.0F/Tsample) + (2.0F/Tsample)*2.0F*rotor_damping_coefficient*rotor_natural_frequency
-//					+ rotor_natural_frequency*rotor_natural_frequency);
-//			c0 = ((2.0F/Tsample)*(2.0F/Tsample)/ao);
-//			c1 = -2.0F * c0;
-//			c2 = c0;
-//			c3 = -(2.0F*rotor_natural_frequency*rotor_natural_frequency - 2.0F*(2.0F/Tsample)*(2.0F/Tsample))/ao;
-//			c4 = -((2.0F/Tsample)*(2.0F/Tsample) - (2.0F/Tsample)*2.0F*rotor_damping_coefficient*rotor_natural_frequency
-//					+ rotor_natural_frequency*rotor_natural_frequency)/ao;
-//		}
-//
-//		/* Transfer function model of form 1/(s^2 + Wn*s) */
-//		if (enable_rotor_plant_design == 2){
-//			IWon_r = 2 / (Wo_r * Tsample);
-//			iir_0_r = 1 - (1 / (1 + IWon_r));
-//			iir_1_r = -iir_0_r;
-//			iir_2_r = (1 / (1 + IWon_r)) * (1 - IWon_r);
-//		}
-
-	/* Optional Transfer function model of form Wn/(s^3 + Wn*s^2)
-	if (enable_rotor_plant_design == 3 && enable_state_feedback == 0){
-	      IWon_r = 2 / (Wo_r * Tsample);
-	      iir_0_r = 1 / (1 + IWon_r);
-	      iir_1_r = iir_0_r;
-	      iir_2_r = iir_0_r * (1 - IWon_r);
-	}
-	*/
-
-	/*
-
-	//Optional display coefficients for rotor plant design transfer function
-	sprintf(tmp_string, "\n\rEnable Design: %i iir_0 %0.4f iir_1 %0.4f iir_2 %0.4f\n\r", enable_rotor_plant_design, iir_0_r, iir_1_r, iir_2_r);
-	HAL_UART_Transmit(&huart2, (uint8_t*) tmp_string, strlen(tmp_string), HAL_MAX_DELAY);
-
-
-	//Optional display coefficients for rotor plant design transfer function
-	sprintf(tmp_string,
-			"\n\ra0 %0.4f c0 %0.4f c1 %0.4f c2 %0.4f c3 %0.4f c4 %0.4f\n\r", ao, c0, c1, c2, c3, c4);
-	HAL_UART_Transmit(&huart2, (uint8_t*) tmp_string, strlen(tmp_string), HAL_MAX_DELAY);
-
-	 */
 
 
 	/*
@@ -1362,15 +928,8 @@ void initialize_main_loop(){
 	}
 
 	//######## Jawad ************** Modification ########################################
-	//SendGAMInput( COMMAND_INDEX_SEND_POSITION );
 
 	ret = rotor_position_read(&rotor_position_steps);
-//		sprintf(msg,
-//				"\r\nPrepare for Control Start - Initial Rotor Position: %i\r\n",
-//				rotor_position_steps);
-//		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-
 	/*
 	 * Determination of vertical down orientation of the pendulum is required
 	 * to establish the reference angle for the vertical upward control setpoint.
@@ -1389,7 +948,6 @@ void initialize_main_loop(){
 	 * in the event that it may be finely balanced in the vertical position
 	 *
 	 */
-
 	BSP_MotorControl_GoTo(0, 3);
 	BSP_MotorControl_WaitWhileActive(0);
 	HAL_Delay(150);
@@ -1402,116 +960,24 @@ void initialize_main_loop(){
 	BSP_MotorControl_GoTo(0, 0);
 	BSP_MotorControl_WaitWhileActive(0);
 
-	sprintf(msg, "Test for Pendulum at Rest - Waiting for Pendulum to Stabilize\r\n");
-	SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-	//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-//	encoder_position_init = 0;
-//	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//	encoder_position_prev = encoder_position_steps;
-//	HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
-//	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//	encoder_position_curr = encoder_position_steps;
-//	while (encoder_position_curr != encoder_position_prev) {
-//		ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//		encoder_position_prev = encoder_position_steps;
-//		HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
-//		ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//		encoder_position_curr = encoder_position_steps;
-//
-//		/*
-//		 * Ensure stability reached with final motion test
-//		 */
-//
-//		if (encoder_position_prev == encoder_position_curr) {
-//			HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
-//			ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//			encoder_position_prev = encoder_position_steps;
-//			HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
-//			ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//			encoder_position_curr = encoder_position_steps;
-//			if (encoder_position_prev == encoder_position_curr) {
-//				break;
-//			}
-//		}
-//		/* Alert user of undesired motion */
-//		sprintf(msg, "Pendulum Motion Detected with angle %0.2f - Waiting for Pendulum to Stabilize\r\n",
-//				(float) ((encoder_position_curr - encoder_position_prev)
-//						/ ENCODER_READ_ANGLE_SCALE));
-//		SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-//		//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//	}
-//
-//	sprintf(msg, "Pendulum Now at Rest and Measuring Pendulum Down Angle\r\n");
-//	SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-	//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-	/* Calibrate down angle */
-
-	/*
-	 * Initialize Pendulum Angle Read offset by setting encoder_position_init
-	 */
-
-//	HAL_Delay(100);
-}
-bool setControlCycle(){
-	/* Compute 100 cycle time average of cycle period for system performance measurement */
-	if(i == 1){
-		cycle_period_start = HAL_GetTick();
-		cycle_period_sum = 100*Tsample*1000 - 1;
-	}
-	if(i % 100 == 0){
-		cycle_period_sum = HAL_GetTick() - cycle_period_start;
-		cycle_period_start = HAL_GetTick();
-	}
-	tick = HAL_GetTick();
-	tick_cycle_previous = tick_cycle_current;
-	tick_cycle_current = tick;
-
-
-	prev_target_cpu_cycle = target_cpu_cycle;
-	target_cpu_cycle += t_sample_cpu_cycles; // Increment target_cpu_cycle by sample time
-
-	current_cpu_cycle = DWT->CYCCNT;
-
-	// If there is time left until target_cpu_cycle
-	if (((int) (target_cpu_cycle - current_cpu_cycle)) > 0) {
-
-		// If DWT->CYCCNT needs to overflow first
-		if (current_cpu_cycle > target_cpu_cycle) {
-			// Wait for DWT->CYCCNT to overflow
-			do {
-				last_cpu_cycle = current_cpu_cycle;
-				current_cpu_cycle = DWT->CYCCNT;
-			} while (current_cpu_cycle >= last_cpu_cycle);
-		}
-
-		DWT_Delay_until_cycle(target_cpu_cycle);
-	} else {
-		// Provide warning and exit if delay exceeds 5 cycles
-		if (current_cpu_cycle - target_cpu_cycle > t_sample_cpu_cycles*5 && enable_cycle_delay_warning == 1) {
-			sprintf(msg, "Error: control loop lag\r\n");
-			HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-			return 0;
-		}
-	}
-
-	/* Record current cpu cycle for delay computation at the end of loop execution */
-	current_cpu_cycle = DWT->CYCCNT;
-
-	/* Compute value of relative delay after insertion of delay adjust */
-	current_cpu_cycle_delay_relative_report = (int)(t_sample_cpu_cycles - (current_cpu_cycle - prev_cpu_cycle));
-	current_cpu_cycle_delay_relative_report = (current_cpu_cycle_delay_relative_report*1000000)/RCC_HCLK_FREQ;
-
-	prev_cpu_cycle = current_cpu_cycle;
-
-	/* Increment cycle counter */
-
-	i++;
-
 }
 
 int main(void) {
+
+
+	/*
+		 * Primary Controller Mode Configuration Loop
+		 *
+		 * Outer Loop acquires configuration command
+		 * Inner Loop includes control system
+		 * Inner Loop exits to Outer Loop upon command or exceedance
+		 * of rotor or pendulum angles
+		 *
+		 * Outer Loop provided user-selected system reset option during
+		 * data entry by Serial Interface
+		 *
+		 */
+
 
 	initialize();
 
@@ -1526,26 +992,14 @@ int main(void) {
 		 *
 		 * *************************************************************************************************
 		 */
-		SendGAMInputMain();
+		Send_Output_Response();
 		while (enable_control_action == 1) {
 
-			/* Exit control if cycle count limit set */
-
-//			if (i > cycle_count && ENABLE_CYCLE_INFINITE == 0) {
-//				sprintf(msg, "Exiting control because of cycle count limit \r\n");
-//				//SendGAMInput( COMMAND_INDEX_SEND_STATUS_ERROR );
-//				break;
-//			}
-
-			if( ProcessGAMOutput() == 0)
+			//Check if a break loop command was received. if Yes, break
+			if( Process_Input_Requests() == 0)
 				break;
-			//if( state != STATE_INITIALIZATION)
-			else
-				SendGAMInputMain( );
 
-			//if( !setControlCycle() ) break;
-
-
+			Send_Output_Response( );
 		}
 		/*
 		 * *************************************************************************************************
@@ -1566,7 +1020,6 @@ int main(void) {
 		/*
 		 * Restore rotor position at low speed profile
 		 */
-
 		ret = rotor_position_read(&rotor_position_steps);
 		BSP_MotorControl_GoTo(0, 0);
 		BSP_MotorControl_SoftStop(0);
@@ -1576,10 +1029,6 @@ int main(void) {
 		 */
 
 		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg,"Exit Control at Rotor Angle, %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-		//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
 
 		/*
 		 * System software reset
@@ -1591,52 +1040,8 @@ int main(void) {
 }
 
 
-/**
- * @brief  extract a message from a circular buffer
- * @param  CircularBuff circular buffer with data
- * @param  InitPos first byte of the message
- * @param  LastPos last added byte position
- * @param  BufMaxLen buffer length
- * @param  Msg pointer to the protocol message
- * @retval Number of bytes read if the msg is finished
- */
-uint16_t Extract_Msg(uint8_t *CircularBuff, uint16_t StartPos, uint16_t LastPos, uint16_t BufMaxLen, T_Serial_Msg *Msg) {
-	/* Number of bytes to be analyzed */
-	uint16_t NumNewByte = 0;
-	/* Byte to be analyzed*/
-	uint8_t Data;
-	/* Circular buffer index */
-	uint16_t MsgIdx;
-	/* Two index for ByteStuffing process  */
-	uint16_t BuffIdx;
-
-	if (LastPos >= StartPos) {
-		NumNewByte = LastPos - StartPos;
-	} else {
-		NumNewByte = BufMaxLen + LastPos - StartPos;
-	}
-	BuffIdx = StartPos;
-
-	for (MsgIdx = 0; MsgIdx < NumNewByte; MsgIdx++) {
-		Data = CircularBuff[BuffIdx];
-		BuffIdx++;
-		if (BuffIdx >= BufMaxLen) {
-			BuffIdx = 0;
-		}
-
-		/* If End of message is found, start to recompose the message */
-		if (Data == SERIAL_MSG_EOF) {
-			Msg->Len = MsgIdx;
-			return MsgIdx + 1;
-		} else {
-			Msg->Data[MsgIdx] = Data;
-		}
-	}
-	return 0;
-}
-
 /* TIM3 init function */
-	void MX_TIM3_Init(void) {
+void MX_TIM3_Init(void) {
 
 	TIM_Encoder_InitTypeDef sConfig;
 	TIM_MasterConfigTypeDef sMasterConfig;
@@ -1670,7 +1075,7 @@ uint16_t Extract_Msg(uint8_t *CircularBuff, uint16_t StartPos, uint16_t LastPos,
 
 /* USART2 init function */
 
-	void MX_USART2_UART_Init(void) {
+void MX_USART2_UART_Init(void) {
 	/* DMA controller clock enable */
 	__HAL_RCC_DMA1_CLK_ENABLE()
 							;
@@ -1795,109 +1200,6 @@ void Error_Handler(uint16_t error) {
  */
 
 /*
- * PID Controller with low pass filter operating on derivative component
- */
-
-__INLINE void pid_filter_control_execute(arm_pid_instance_a_f32 *PID, float * current_error,
-		float * sample_period, float * Deriv_Filt) {
-
-		float int_term, diff, diff_filt;
-
-	  /* Compute time integral of error by trapezoidal rule */
-	  int_term = PID->Ki*(*sample_period)*((*current_error) + PID->state_a[0])/2;
-
-	  /* Compute time derivative of error */
-	  diff = PID->Kd*((*current_error) - PID->state_a[0])/(*sample_period);
-
-	  /* Compute first order low pass filter of time derivative */
-	  diff_filt = Deriv_Filt[0] * diff
-				+ Deriv_Filt[0] * PID->state_a[2]
-				- Deriv_Filt[1] * PID->state_a[3];
-
-	  /* Accumulate PID output with Integral, Derivative and Proportional contributions*/
-
-	  PID->control_output = diff_filt + int_term + PID->Kp*(*current_error);
-
-	  /* Update state variables */
-	  PID->state_a[1] = PID->state_a[0];
-	  PID->state_a[0] = *current_error;
-	  PID->state_a[2] = diff;
-	  PID->state_a[3] = diff_filt;
-	  PID->int_term = int_term;
-}
-
-
-/*
- * Encoder position read (returns signed integer)
- *
- * Includes capability for tracking pendulum excursion for Swing Up control.
- * This is developed and provided by Markus Dauberschmidt.  Please see
- * https://github.com/OevreFlataeker/steval_edukit_swingup
- *
- */
-
-__INLINE int encoder_position_read(int *encoder_position, int encoder_position_init, TIM_HandleTypeDef *htim3) {
-
-	cnt3 = __HAL_TIM_GET_COUNTER(htim3);
-
-	if (cnt3 >= 32768) {
-		*encoder_position = (int) (cnt3);
-		*encoder_position = *encoder_position - 65536;
-	} else {
-		*encoder_position = (int) (cnt3);
-	}
-
-	range_error = 0;
-	if (*encoder_position <= -32768) {
-		range_error = -1;
-		*encoder_position = -32768;
-	}
-	if (*encoder_position >= 32767) {
-		range_error = 1;
-		*encoder_position = 32767;
-	}
-
-	*encoder_position = *encoder_position - encoder_position_init;
-
-	/*
-	 *  Detect if we passed the bottom, then re-arm peak flag
-	 *  oppositeSigns returns true when we pass the bottom position
-	 */
-
-
-	if (oppositeSigns(*encoder_position, previous_encoder_position))
-	{
-		peaked = 0;
-		zero_crossed = 1;
-	}
-
-	if (!peaked) // We don't need to evaluate anymore if we hit a maximum when we're still in downward motion and didn't cross the minimum
-	{
-		// Add global maximum
-		if (abs(*encoder_position) >= abs(global_max_encoder_position))
-		{
-			global_max_encoder_position = *encoder_position;
-		}
-		// Check if new maximum
-		if (abs(*encoder_position) >= abs(max_encoder_position))
-		{
-			max_encoder_position = *encoder_position;
-		}
-		else
-		{
-			// We are at the peak and disable further checks until we traversed the minimum position again
-			peaked = 1;
-			handled_peak = 0;
-		}
-	}
-
-	previous_encoder_position = *encoder_position;
-
-
-	return range_error;
-}
-
-/*
  * Returns true if the two arguments have opposite sign, false if not
  * @retval bool.
  * Developed and provided by Markus Dauberschmidt
@@ -1917,7 +1219,6 @@ void rotor_position_set(void) {
 	rotor_position_u = BSP_MotorControl_GetPosition(0);
 	BSP_MotorControl_SetHome(0, rotor_position_u);
 }
-
 
 /*
  * Rotor position read (returns signed integer)
@@ -1948,169 +1249,12 @@ __INLINE int rotor_position_read(int *rotor_position) {
 	return range_error;
 }
 
-/*
- * Single float value read
- */
-
-void read_float(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, float *float_return) {
-
-	int k;
-
-	while (1) {
-		*RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
-		*readBytes = Extract_Msg(RxBuffer, *RxBuffer_ReadIdx, *RxBuffer_WriteIdx, UART_RX_BUFFER_SIZE, &Msg);
-
-		if (*readBytes)
-		{
-			*RxBuffer_ReadIdx = (*RxBuffer_ReadIdx + *readBytes)
-											% UART_RX_BUFFER_SIZE;
-			*float_return = atof((char*) Msg.Data);
-			for (k = 0; k < SERIAL_MSG_MAXLEN; k++) {
-				Msg.Data[k] = 0;
-			}
-			*readBytes = 0;
-			break;
-		}
-		HAL_Delay(100);
-	}
-}
-
-/*
- * Single integer value read
- */
-
-void read_int(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, int * int_return) {
-
-	int k;
-
-	while (1) {
-		*RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
-		*readBytes = Extract_Msg(RxBuffer, *RxBuffer_ReadIdx, *RxBuffer_WriteIdx, UART_RX_BUFFER_SIZE, &Msg);
-
-		if (*readBytes)
-		{
-			*RxBuffer_ReadIdx = (*RxBuffer_ReadIdx + *readBytes)
-											% UART_RX_BUFFER_SIZE;
-
-			*int_return = atoi((char*)(Msg.Data));
-			for (k = 0; k < SERIAL_MSG_MAXLEN; k++) {
-				Msg.Data[k] = 0;
-			}
-			*readBytes = 0;
-			break;
-		}
-		HAL_Delay(100);
-	}
-}
-
-/*
- * Single character value read
- */
-
-void read_char(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, char * char_return) {
-
-	int k;
-
-	while (1) {
-		*RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
-		*readBytes = Extract_Msg(RxBuffer, *RxBuffer_ReadIdx, *RxBuffer_WriteIdx, UART_RX_BUFFER_SIZE, &Msg);
-
-		if (*readBytes)
-		{
-			*RxBuffer_ReadIdx = (*RxBuffer_ReadIdx + *readBytes)
-											% UART_RX_BUFFER_SIZE;
-			char_return = (char*)(Msg.Data);
-			for (k = 0; k < SERIAL_MSG_MAXLEN; k++) {
-				Msg.Data[k] = 0;
-			}
-			*readBytes = 0;
-			break;
-		}
-		HAL_Delay(100);
-	}
-}
-
-/*
- * Assign operating modes for
- * 			PID Output Feedback Mode 1
- * 			PID Output Feedback Mode 2
- * 			PID Output Feedback Mode 3
- *
- * Mode assignments may be user configured below
- */
-
-void assign_mode_1(arm_pid_instance_a_f32 *PID_Pend,
-		arm_pid_instance_a_f32 *PID_Rotor){
-	select_suspended_mode = 0;
-	proportional = PRIMARY_PROPORTIONAL_MODE_1;
-	integral = PRIMARY_INTEGRAL_MODE_1;
-	derivative = PRIMARY_DERIVATIVE_MODE_1;
-	rotor_p_gain = SECONDARY_PROPORTIONAL_MODE_1;
-	rotor_i_gain = SECONDARY_INTEGRAL_MODE_1;
-	rotor_d_gain = SECONDARY_DERIVATIVE_MODE_1;
-	PID_Pend->Kp = proportional;
-	PID_Pend->Ki = integral;
-	PID_Pend->Kd = derivative;
-	PID_Rotor->Kp = rotor_p_gain;
-	PID_Rotor->Ki = rotor_i_gain;
-	PID_Rotor->Kd = rotor_d_gain;
-	torq_current_val = MAX_TORQUE_CONFIG;
-	L6474_SetAnalogValue(0, L6474_TVAL, torq_current_val);
-}
-
-void assign_mode_2(arm_pid_instance_a_f32 *PID_Pend,
-		arm_pid_instance_a_f32 *PID_Rotor){
-	select_suspended_mode = 0;
-	proportional = PRIMARY_PROPORTIONAL_MODE_2;
-	integral = PRIMARY_INTEGRAL_MODE_2;
-	derivative = PRIMARY_DERIVATIVE_MODE_2;
-	rotor_p_gain = SECONDARY_PROPORTIONAL_MODE_2;
-	rotor_i_gain = SECONDARY_INTEGRAL_MODE_2;
-	rotor_d_gain = SECONDARY_DERIVATIVE_MODE_2;
-	PID_Pend->Kp = proportional;
-	PID_Pend->Ki = integral;
-	PID_Pend->Kd = derivative;
-	PID_Rotor->Kp = rotor_p_gain;
-	PID_Rotor->Ki = rotor_i_gain;
-	PID_Rotor->Kd = rotor_d_gain;
-	torq_current_val = MAX_TORQUE_CONFIG;
-	L6474_SetAnalogValue(0, L6474_TVAL, torq_current_val);
-}
-
-void assign_mode_3(arm_pid_instance_a_f32 *PID_Pend,
-		arm_pid_instance_a_f32 *PID_Rotor){
-	select_suspended_mode = 0;
-	proportional = PRIMARY_PROPORTIONAL_MODE_3;
-	integral = PRIMARY_INTEGRAL_MODE_3;
-	derivative = PRIMARY_DERIVATIVE_MODE_3;
-	rotor_p_gain = SECONDARY_PROPORTIONAL_MODE_3;
-	rotor_i_gain = SECONDARY_INTEGRAL_MODE_3;
-	rotor_d_gain = SECONDARY_DERIVATIVE_MODE_3;
-	PID_Pend->Kp = proportional;
-	PID_Pend->Ki = integral;
-	PID_Pend->Kd = derivative;
-	PID_Rotor->Kp = rotor_p_gain;
-	PID_Rotor->Ki = rotor_i_gain;
-	PID_Rotor->Kd = rotor_d_gain;
-	torq_current_val = MAX_TORQUE_CONFIG;
-	L6474_SetAnalogValue(0, L6474_TVAL, torq_current_val);
-}
-
 
 /*
  * Configure system based on user selection
  */
 
-void user_configuration(void){
-
-
-
-	enable_rotor_actuator_test = 0;
-	enable_rotor_actuator_control = 0;
-	enable_encoder_test = 0;
-	enable_rotor_actuator_high_speed_test = 0;
-	enable_motor_actuator_characterization_mode = 0;
-	enable_full_sysid = 0;
+void set_default_configurations(void){
 
 	enable_rotor_tracking_comb_signal = 0;
 	rotor_track_comb_amplitude = 0;
@@ -2121,14 +1265,7 @@ void user_configuration(void){
 //############## Jawad Modification  -->> ###############################
 	enable_state_feedback = 0;
 	select_suspended_mode = 0;
-	proportional = 		PRIMARY_PROPORTIONAL_MODE_1;
-	integral = 			PRIMARY_INTEGRAL_MODE_1;
-	derivative = 		PRIMARY_DERIVATIVE_MODE_1;
-	rotor_p_gain = 		SECONDARY_PROPORTIONAL_MODE_1;
-	rotor_i_gain = 		SECONDARY_INTEGRAL_MODE_1;
-	rotor_d_gain = 		SECONDARY_DERIVATIVE_MODE_1;
-	max_speed = 		MAX_SPEED_MODE_1;
-	min_speed = 		MIN_SPEED_MODE_1;
+
 	enable_rotor_plant_design = 0;
 	enable_rotor_plant_gain_design = 0;
 	enable_rotor_position_step_response_cycle = 0;
@@ -2143,236 +1280,20 @@ void user_configuration(void){
 
 }
 
+
 /*
- * Rotor and encoder test mode
+ *Jawad Modification ======== ########################
+ *Send_Output_Response
+
  */
-
-void rotor_encoder_test(void){
-	/*
-	 * Set Motor Speed Profile
-	 */
-
-	BSP_MotorControl_SetMaxSpeed(0, MAX_SPEED_MODE_1);
-	BSP_MotorControl_SetMinSpeed(0, MIN_SPEED_MODE_1);
-
-	sprintf(msg, "\n\rMotor Profile Speeds Min %u Max %u",
-			rotor_test_speed_min, rotor_test_speed_max);
-	HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-	BSP_MotorControl_SetAcceleration(0,(uint16_t)(MAX_ACCEL));
-	BSP_MotorControl_SetDeceleration(0,(uint16_t)(MAX_DECEL));
-
-	sprintf(msg, "\n\rMotor Profile Acceleration Max %u Deceleration Max %u",
-			BSP_MotorControl_GetAcceleration(0), BSP_MotorControl_GetDeceleration(0));
-	HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-	j = 0;
-
-	while (j < ROTOR_ACTUATOR_TEST_CYCLES) {
-
-		j++;
-
-		sprintf(msg, "\r\n\r\n********  Starting Rotor Motor Control Test  ********\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg, "Motor Position at Zero Angle: %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Next Test in 3s\r\n\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-		HAL_Delay(3000);
-
-		rotor_position_command_deg = -45;
-		BSP_MotorControl_GoTo(0, (int)(rotor_position_command_deg*STEPPER_CONTROL_POSITION_STEPS_PER_DEGREE));
-		BSP_MotorControl_WaitWhileActive(0);
-
-		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg, "Motor Position Test to -45 Degree Angle: %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Correct motion shows rotor rotating to left\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-		sprintf(msg, "Next Test in 3s\r\n\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-		HAL_Delay(3000);
-
-		rotor_position_command_deg = 0;
-		BSP_MotorControl_GoTo(0, (int)(rotor_position_command_deg*STEPPER_CONTROL_POSITION_STEPS_PER_DEGREE));
-		BSP_MotorControl_WaitWhileActive(0);
-
-		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg, "Motor Position Test to Zero Angle: %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Correct motion shows rotor returning to zero angle\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Next Test in 3s\r\n\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-		HAL_Delay(3000);
-
-		rotor_position_command_deg = 90;
-		BSP_MotorControl_GoTo(0, (int)(rotor_position_command_deg*STEPPER_CONTROL_POSITION_STEPS_PER_DEGREE));
-		BSP_MotorControl_WaitWhileActive(0);
-
-		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg, "Motor Position at 90 Degree Angle: %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-		sprintf(msg, "Correct motion shows rotor rotating to right\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Next Test in 3s\r\n\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-		HAL_Delay(3000);
-
-		rotor_position_command_deg = 0;
-		BSP_MotorControl_GoTo(0, (int)(rotor_position_command_deg*STEPPER_CONTROL_POSITION_STEPS_PER_DEGREE));
-		BSP_MotorControl_WaitWhileActive(0);
-
-		ret = rotor_position_read(&rotor_position_steps);
-		sprintf(msg, "Motor Position at Zero Angle: %.2f\r\n",
-				(float) ((rotor_position_steps) / STEPPER_READ_POSITION_STEPS_PER_DEGREE));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Correct motion shows rotor rotating to zero angle\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-
-		sprintf(msg, "Rotor Actuator Test Cycle Complete, Next Test in 3s\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),HAL_MAX_DELAY);
-		HAL_Delay(3000);
-	}
-	/*
-	 * 	Encoder Test Sequence will execute at each cycle of operation if enable_encoder_test is set to 1
-	 */
-
-	if (enable_encoder_test == 1) {
-		sprintf(msg, "\r\n*************  Starting Encoder Test  ***************\r\n\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-
-		sprintf(msg, "Permit Pendulum to Stabilize in Vertical Down\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		HAL_Delay(1000);
-		sprintf(msg, "Angle will be measured in 3 seconds\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		HAL_Delay(3000);
-
-		ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-		encoder_position_down = encoder_position;
-		sprintf(msg, "Encoder Angle is: %.2f \r\n(Correct value should lie between -0.5 and 0.5 degrees))\r\n\r\n",
-				(float) (encoder_position_down / angle_scale));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-
-		sprintf(msg,
-				"Manually Rotate Pendulum in Clock Wise Direction One Full 360 Degree Turn and Stabilize Down\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		sprintf(msg, "Angle will be measured in 10 seconds\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		HAL_Delay(10000);
-
-		ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-		sprintf(msg, "Encoder Angle is: %.2f\r\n(Correct value should lie between -359.5 and -360.5 degrees)\r\n\r\n",
-				(float) ((encoder_position_steps - encoder_position_down)
-						/ angle_scale));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-
-		sprintf(msg,
-				"Manually Rotate Pendulum in Counter Clock Wise Direction One Full 360 Degree Turn and Stabilize Down\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		sprintf(msg, "Angle will be measured in 10 seconds\r\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		HAL_Delay(10000);
-
-		ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-		sprintf(msg, "Encoder Angle is: %.2f \r\n(Correct value should lie between -0.5 and 0.5 degrees) \r\n\r\n",
-				(float) ((encoder_position_steps - encoder_position_down)
-						/ angle_scale));
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-
-		L6474_CmdDisable(0);
-		sprintf(msg, "\r\nPendulum Encoder Characterization Complete");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg),
-				HAL_MAX_DELAY);
-		sprintf(msg, "\n\r\n\r*************************System Reset and Restart***************************\n\r\n\r");
-		HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-		HAL_Delay(3000);
-		NVIC_SystemReset();
-	}
-}
-
 
 
 /*
  *Jawad Modification ======== ########################
- *SendGAMInput
- *Command structure:  command_index [command_parameter];
- * list of commands:
- * status  ==> 0
- * Positions  ==> 1
+ * Read input frame and decode it
  */
-
-
-
-void SendGAMInput(  ){
-
-//	switch( type ){
-//		case COMMAND_INDEX_SEND_STATUS_ERROR: //status message
-//			sprintf(msg_cmd, "0,1,%s", msg);
-//			break;
-//		case COMMAND_INDEX_SEND_STATUS_INFO: //status message
-//			sprintf(msg_cmd, "0,0,%s", msg);
-//			break;
-//		case COMMAND_INDEX_SEND_GAMInput: //position information
-//			ret = rotor_position_read(&rotor_position_steps);
-//
-//			ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//			if (select_suspended_mode == 0) {
-//				encoder_position = encoder_position_steps - encoder_position_down - (int)(180 * angle_scale);
-//				encoder_position = encoder_position - encoder_position_offset;
-//			}
-//			if (select_suspended_mode == 1) {
-//				encoder_position = encoder_position_steps - encoder_position_down;
-//				encoder_position = encoder_position - encoder_position_offset;
-//			}
-//
-//			uint32_t pwm_count = L6474_Board_Pwm1GetCounter();
-//			apply_acc_start_time = DWT->CYCCNT;
-//			sprintf(msg_cmd, "1,%i,%i,%i,%i", rotor_position_steps, encoder_position_steps, pwm_count, apply_acc_start_time);
-//			break;
-//	}
-
-	//ret = HAL_UART_Transmit(&huart2, (uint8_t*) msg_cmd, sizeof(frame), HAL_MAX_DELAY);
-
-}
-
-
-void SendGAMInputMain(  ){
+void Send_Output_Response(  ){
 	ret = rotor_position_read(&rotor_position_steps);
-//	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//	if (select_suspended_mode == 0) {
-//		encoder_position = encoder_position_steps - encoder_position_down - (int)(180 * angle_scale);
-//		encoder_position = encoder_position - encoder_position_offset;
-//	}
-//	if (select_suspended_mode == 1) {
-//		encoder_position = encoder_position_steps - encoder_position_down;
-//		encoder_position = encoder_position - encoder_position_offset;
-//	}
 
 //DataFrameSend_SIZE,DataFrameReceive_SIZE
 
@@ -2411,136 +1332,6 @@ void SendGAMInputMain(  ){
 
 void STATE_Pendulum_Stablisation_Postprocessing(){
 	HAL_Delay(100);
-	//	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-	//	encoder_position_init = encoder_position_steps;
-	//
-	//	if (ret == -1) {
-	//		sprintf(msg, "Encoder Position Under Range Error\r\n");
-	//		SendGAMInput( COMMAND_INDEX_SEND_STATUS_ERROR );
-	//		//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-	//	}
-	//	if (ret == 1) {
-	//		sprintf(msg, "Encoder Position Over Range Error\r\n");
-	//		SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-	//		//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-	//	}
-	//
-	//	ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-	//	encoder_position_down = encoder_position_steps;
-		//sprintf(msg, "Pendulum Initial Angle %i\r\n", encoder_position_steps);
-		//SendGAMInput( COMMAND_INDEX_SEND_POSITION );
-		//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-
-//
-//		if (enable_swing_up == 0){
-//			/*
-//			 * Alert user with rotor motion prompt to adjust pendulum upright by
-//			 */
-//			BSP_MotorControl_GoTo(0, 30);
-//			BSP_MotorControl_WaitWhileActive(0);
-//			HAL_Delay(150);
-//			BSP_MotorControl_GoTo(0, -30);
-//			BSP_MotorControl_WaitWhileActive(0);
-//			HAL_Delay(150);
-//			BSP_MotorControl_GoTo(0, 30);
-//			BSP_MotorControl_WaitWhileActive(0);
-//			HAL_Delay(150);
-//			BSP_MotorControl_GoTo(0, 0);
-//			BSP_MotorControl_WaitWhileActive(0);
-//
-//			/* Request user action to bring pendulum upright */
-//			if(select_suspended_mode == 0){
-//				sprintf(msg, "Adjust Pendulum Upright By Turning CCW Control Will Start When Vertical\r\n");
-//				//SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-//				//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//			}
-//
-//		}
-
-		/*
-		 * Detect Start Condition for Pendulum Angle for Inverted Model
-		 *
-		 * Detect Pendulum Angle equal to vertical within tolerance of START_ANGLE
-		 *
-		 * Exit if no vertical orientation action detected and alert user to restart,
-		 * then disable control and enable system restart.
-		 *
-		 * Permitted delay for user action is PENDULUM_ORIENTATION_START_DELAY.
-		 *
-		 */
-
-		/*
-		 * System start option with manual lifting of Pendulum to vertical by user
-		 */
-
-//		if (enable_swing_up == 0){
-//
-//			tick_wait_start = HAL_GetTick();
-//			if (select_suspended_mode == 0) {
-//				while (1){
-//					ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-//					if (fabs(encoder_position_steps - encoder_position_down - (int) (180 * angle_scale)) < START_ANGLE * angle_scale){
-//						HAL_Delay(START_ANGLE_DELAY);
-//						break;
-//					}
-//					if (fabs(encoder_position_steps - encoder_position_down + (int)(180 * angle_scale)) < START_ANGLE * angle_scale){
-//						encoder_position_down = encoder_position_down - 2*(int)(180 * angle_scale);
-//						HAL_Delay(START_ANGLE_DELAY);
-//						break;
-//					}
-//					tick_wait = HAL_GetTick();
-//
-//					if ( (tick_wait - tick_wait_start) > PENDULUM_ORIENTATION_START_DELAY){
-//						sprintf(msg, "Pendulum Upright Action Not Detected - Restarting ...\r\n");
-//						SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-//						//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//						enable_control_action = 0;
-//						break;
-//					}
-//				}
-//			}
-//		}
-
-
-		/*
-		 * For case of Suspended Mode Operation, no initial condition check is required
-		 * for pendulum down angle.
-		 */
-
-//		if(select_suspended_mode == 1){
-//			sprintf(msg, "Suspended Mode Control Will Start in %i Seconds\r\n", (int) (CONTROL_START_DELAY / 1000));
-//			SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-//			//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
-//		}
-
-
-		/*
-		 * Initialize Primary and Secondary PID controllers
-		 */
-
-	//		*current_error_steps = 0;
-	//		*current_error_rotor_steps = 0;
-	//		PID_Pend.state_a[0] = 0;
-	//		PID_Pend.state_a[1] = 0;
-	//		PID_Pend.state_a[2] = 0;
-	//		PID_Pend.state_a[3] = 0;
-	//		PID_Pend.int_term = 0;
-	//		PID_Pend.control_output = 0;
-	//		PID_Rotor.state_a[0] = 0;
-	//		PID_Rotor.state_a[1] = 0;
-	//		PID_Rotor.state_a[2] = 0;
-	//		PID_Rotor.state_a[3] = 0;
-	//		PID_Rotor.int_term = 0;
-	//		PID_Rotor.control_output = 0;
-	//
-	//		/* Initialize Pendulum PID control state */
-	//		pid_filter_control_execute(&PID_Pend, current_error_steps, sample_period,
-	//				 Deriv_Filt_Pend);
-	//
-	//		/* Initialize Rotor PID control state */
-	//		*current_error_rotor_steps = 0;
-	//		pid_filter_control_execute(&PID_Rotor, current_error_rotor_steps,
-	//				sample_period_rotor, Deriv_Filt_Rotor);
 
 		/* Initialize control system variables */
 
@@ -2582,7 +1373,6 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 		rotor_track_comb_command = 0;
 		noise_rej_signal_prev = 0;
 		noise_rej_signal_filter_prev = 0;
-		full_sysid_start_index = -1;
 		current_cpu_cycle = 0;
 		speed_scale = DATA_REPORT_SPEED_SCALE;
 		speed_governor = 0;
@@ -2593,10 +1383,6 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 			offset_angle[m] = 0;
 		}
 
-		/* Clear read buffer */
-	//	for (k = 0; k < SERIAL_MSG_MAXLEN; k++) {
-	//		Msg.Data[k] = 0;
-	//	}
 		/* Initialize UART receive system */
 		__HAL_DMA_RESET_HANDLE_STATE(&hdma_usart2_rx);
 
@@ -2607,13 +1393,6 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 		 */
 
 		/* Initial control state parameter storage */
-
-	//	init_r_p_gain = PID_Rotor.Kp;
-	//	init_r_i_gain = PID_Rotor.Ki;
-	//	init_r_d_gain = PID_Rotor.Kd;
-	//	init_p_p_gain = PID_Pend.Kp;
-	//	init_p_i_gain = PID_Pend.Ki;
-	//	init_p_d_gain = PID_Pend.Kd;
 		init_enable_state_feedback = enable_state_feedback;
 		init_integral_compensator_gain = integral_compensator_gain;
 		init_feedforward_gain = feedforward_gain;
@@ -2647,13 +1426,6 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 			 * Apply controller parameters for initial operation at completion of
 			 * Swing Up
 			 */
-
-	//		PID_Rotor.Kp = 20;
-	//		PID_Rotor.Ki = 10;
-	//		PID_Rotor.Kd = 10;
-	//		PID_Pend.Kp = 300;
-	//		PID_Pend.Ki = 0.0;
-	//		PID_Pend.Kd = 30.0;
 			enable_state_feedback = 0;
 			integral_compensator_gain = 0;
 			feedforward_gain = 1;
@@ -2669,97 +1441,20 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 			torq_current_val = MAX_TORQUE_SWING_UP;
 			L6474_SetAnalogValue(0, L6474_TVAL, torq_current_val);
 
-			sprintf(msg, "Pendulum Swing Up Starting\r\n");
-			//SendGAMInput( COMMAND_INDEX_SEND_STATUS_INFO );
-			//HAL_UART_Transmit(&huart2, (uint8_t*) msg, strlen(msg), HAL_MAX_DELAY);
+
+			//******Pendulum Swing Up Starting
 
 			/* Initialize position and motion variables */
-			max_encoder_position = 0;
-			global_max_encoder_position = 0;
-			peaked = 0;
-			handled_peak = 0;
-			swing_up_state = 0;
-			swing_up_state_prev = 0;
-			zero_crossed = 0;
-			stage_count = 0;
 			/* Select initial amplitude for rotor impulse */
 			stage_amp = STAGE_0_AMP;
 
-			/* Optional encoder state reporting */
-			//sprintf(tmp_string,"Current Position %0.2f\r\n", (encoder_position - encoder_position_down)/angle_scale);
-			//HAL_UART_Transmit(&huart2, (uint8_t*) tmp_string, strlen(tmp_string), HAL_MAX_DELAY);
-
-			//sprintf(tmp_string,"Current Position Down %0.2f\r\n", encoder_position_down/angle_scale);
-			//HAL_UART_Transmit(&huart2, (uint8_t*) tmp_string, strlen(tmp_string), HAL_MAX_DELAY);
 
 			/* Initiate first swing */
 			swing_up_direction = FORWARD;
 			BSP_MotorControl_Move(0, swing_up_direction, 150);
 			BSP_MotorControl_WaitWhileActive(0);
 
-
-			/* Enter Swing Up Loop */
-	//		while (1)
-	//		{
-	//			//break;
-	//			HAL_Delay(2);
-	//			ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-	//			/* Optional Swing Up progress reporting */
-	//			//sprintf(tmp_string,"Rotor Impulse Amplitude %i Max Angle (degrees) %0.3f\r\n", stage_amp, fabs((float)(global_max_encoder_position)/(ENCODER_READ_ANGLE_SCALE)));
-	//			//HAL_UART_Transmit(&huart2, (uint8_t*) tmp_string, strlen(tmp_string), HAL_MAX_DELAY);
-	//
-	//			/* Break if pendulum angle relative to vertical meets tolerance (for clockwise or counter clockwise approach */
-	//			if (fabs(encoder_position_steps - encoder_position_down - (int) (180 * angle_scale)) < START_ANGLE * angle_scale){
-	//				break;
-	//			}
-	//			if (fabs(encoder_position_steps - encoder_position_down + (int)(180 * angle_scale)) < START_ANGLE * angle_scale){
-	//				encoder_position_down = encoder_position_down - 2*(int)(180 * angle_scale);
-	//				break;
-	//			}
-	//
-	//			if (zero_crossed)
-	//			{
-	//				zero_crossed = 0;
-	//				// Push it aka put some more kinetic energy into the pendulum
-	//				if (swing_up_state == 0){
-	//					BSP_MotorControl_Move(0, swing_up_direction, stage_amp);
-	//					BSP_MotorControl_WaitWhileActive(0);
-	//					stage_count++;
-	//
-	//					if (prev_global_max_encoder_position != global_max_encoder_position && stage_count > 4){
-	//					if (abs(global_max_encoder_position) < 600){
-	//						stage_amp = STAGE_0_AMP;
-	//					}
-	//					if (abs(global_max_encoder_position) >= 600 && abs(global_max_encoder_position) < 1000){
-	//						stage_amp = STAGE_1_AMP;
-	//					}
-	//					if (abs(global_max_encoder_position) >= 1000){
-	//						stage_amp = STAGE_2_AMP;
-	//					}
-	//					}
-	//					prev_global_max_encoder_position = global_max_encoder_position;
-	//					global_max_encoder_position = 0;
-	//					ret = encoder_position_read(&encoder_position_steps, encoder_position_init, &htim3);
-	//				}
-	//			}
-	//
-	//
-	//			// We have a peak but did not handle it yet
-	//			if (peaked && !handled_peak)
-	//			{
-	//				// Ensure we only enter this branch one per peak
-	//				handled_peak = 1;
-	//				// Reset maximum encoder value to reassess after crossing the bottom
-	//				max_encoder_position = 0;
-	//				// Switch motor direction
-	//				swing_up_direction = swing_up_direction == FORWARD ? BACKWARD : FORWARD;
-	//			}
-	//		}
 		}
-
-
-
-
 
 }
 void STATE_Swinp_Up_Postprocessing(){
@@ -2784,10 +1479,11 @@ void STATE_Swinp_Up_Postprocessing(){
 
 	//HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
 }
-/*
- * Single integer value read
- */
 
+/*
+ *Jawad Modification ======== ########################
+ * Read input frame and decode it
+ */
 int read_Frame() {
 
 	int k;
@@ -2861,7 +1557,7 @@ int read_Frame() {
  *Jawad Modification ======== ########################
  *Command processor
  */
-int ProcessGAMOutput( void ){
+int Process_Input_Requests(  ){
 
 
 	if ( read_Frame() ) // Message found
