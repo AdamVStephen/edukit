@@ -194,6 +194,7 @@ L6474_Init_t gL6474InitParams = {
  	int32_t positionRotor;
  	uint32_t encoder_counter;
  	uint32_t  Pwm1Counter;
+	uint8_t INPUT_break_Control_Loop;
 // 	uint32_t CYCCNT;
 // 	int32_t LOOP_BACK_rotor_control_target_steps;
 // 	uint32_t LOOP_BACK_L6474_Board_Pwm1Period;
@@ -204,7 +205,7 @@ L6474_Init_t gL6474InitParams = {
  } DataFrameSend;
 #pragma pack(pop)
 
-#define DataFrameSend_SIZE  12
+#define DataFrameSend_SIZE  13
 
  #pragma pack(push, 1)
  typedef struct
@@ -248,7 +249,7 @@ void read_char(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint3
 void select_mode_1(void);
 void set_default_configurations(void);
 void Main_StepClockHandler();
-void apply_acceleration(float * acc, float* target_velocity_prescaled, float t_sample);
+void apply_acceleration(float  acc, float* target_velocity_prescaled, float t_sample);
 
 #define delayUS_ASM(us) do {\
 		asm volatile (	"MOV R0,%[loops]\n\t"\
@@ -285,7 +286,7 @@ void Main_StepClockHandler() {
 	}
 }
 
-void apply_acceleration(float * acc, float * target_velocity_prescaled, float t_sample) {
+void apply_acceleration(float acc, float * target_velocity_prescaled, float t_sample) {
 	/*
 	 *  Stepper motor acceleration, speed, direction and position control developed by Ryan Nemiroff
 	 */
@@ -303,20 +304,20 @@ void apply_acceleration(float * acc, float * target_velocity_prescaled, float t_
 	motorDir_t old_dir = *target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
 
 	if (old_dir == FORWARD) {
-		if (*acc > MAXIMUM_ACCELERATION) {
-			*acc = MAXIMUM_ACCELERATION;
-		} else if (*acc < -MAXIMUM_DECELERATION) {
-			*acc = -MAXIMUM_DECELERATION;
+		if (acc > MAXIMUM_ACCELERATION) {
+			acc = MAXIMUM_ACCELERATION;
+		} else if (acc < -MAXIMUM_DECELERATION) {
+			acc = -MAXIMUM_DECELERATION;
 		}
 	} else {
-		if (*acc < -MAXIMUM_ACCELERATION) {
-			*acc = -MAXIMUM_ACCELERATION;
-		} else if (*acc > MAXIMUM_DECELERATION) {
-			*acc = MAXIMUM_DECELERATION;
+		if (acc < -MAXIMUM_ACCELERATION) {
+			acc = -MAXIMUM_ACCELERATION;
+		} else if (acc > MAXIMUM_DECELERATION) {
+			acc = MAXIMUM_DECELERATION;
 		}	
 	}
 
-	*target_velocity_prescaled += L6474_Board_Pwm1PrescaleFreq(*acc) * t_sample;
+	*target_velocity_prescaled += L6474_Board_Pwm1PrescaleFreq(acc) * t_sample;
 	motorDir_t new_dir = *target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
 
 	if (*target_velocity_prescaled > L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED)) {
@@ -408,6 +409,8 @@ uint32_t LOOP_BACK_L6474_Board_Pwm1Period;
 uint8_t  LOOP_BACK_gpioState;
 uint8_t  LOOP_BACK_break_Control_Loop;
 uint8_t  LOOP_BACK_state;
+
+uint8_t INPUT_break_Control_Loop;
 DataFrameReceive rx_frame;
 DataFrameSend tx_frame;
 uint8_t rx_frameBuffer[ DataFrameReceive_SIZE ];
@@ -890,6 +893,8 @@ void initialize_main_loop(){
 	LOOP_BACK_break_Control_Loop = 0;
 	LOOP_BACK_state = 0;
 
+	INPUT_break_Control_Loop=0;
+
 	mode_interactive = 0;
 
 	/* Start timer for configuration command read loop */
@@ -998,8 +1003,8 @@ int main(void) {
 			//Check if a break loop command was received. if Yes, break
 			if( Process_Input_Requests() == 0)
 				break;
-
 			Send_Output_Response( );
+
 		}
 		/*
 		 * *************************************************************************************************
@@ -1314,6 +1319,8 @@ void Send_Output_Response(  ){
 	tx_frame.positionRotor = rotor_position_steps;
 	tx_frame.encoder_counter =  __HAL_TIM_GET_COUNTER( (TIM_HandleTypeDef*) &htim3);
 	tx_frame.Pwm1Counter = L6474_Board_Pwm1GetCounter();
+	tx_frame.INPUT_break_Control_Loop = INPUT_break_Control_Loop;
+	INPUT_break_Control_Loop = 0;
 //	tx_frame.CYCCNT = DWT->CYCCNT;
 
 //	tx_frame.LOOP_BACK_rotor_control_target_steps = LOOP_BACK_rotor_control_target_steps;
@@ -1456,6 +1463,18 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 
 		}
 
+		BSP_MotorControl_GoTo(0, 30);
+		BSP_MotorControl_WaitWhileActive(0);
+		HAL_Delay(150);
+		BSP_MotorControl_GoTo(0, -30);
+		BSP_MotorControl_WaitWhileActive(0);
+		HAL_Delay(150);
+		BSP_MotorControl_GoTo(0, 30);
+		BSP_MotorControl_WaitWhileActive(0);
+		HAL_Delay(150);
+		BSP_MotorControl_GoTo(0, 0);
+		BSP_MotorControl_WaitWhileActive(0);
+
 }
 void STATE_Swinp_Up_Postprocessing(){
 
@@ -1491,6 +1510,10 @@ int read_Frame() {
 	/* Number of bytes to be analyzed */
 	uint16_t NumNewByte = 0;
 
+	//############ Validation Begin################################################################
+	//RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE -(RxBuffer_ReadIdx+1);// __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
+	//############Validation End #########################################################################
+
 	RxBuffer_WriteIdx = UART_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
 	uint16_t LastPos  = RxBuffer_WriteIdx;
 	uint16_t StartPos = RxBuffer_ReadIdx;
@@ -1514,17 +1537,17 @@ int read_Frame() {
 	//############ Validation Begin################################################################
 //	                           |  int32                |     uint32           |uint8|uint8| uint8
 //	uint8_t buff[ UART_RX_BUFFER_SIZE] =
-//							  {0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//			                   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
-//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
+//							  {0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x01,  //1, 3, 2, 4, 5
+//			                   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x01,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x01,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x01,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x02,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x02,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x02,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x03,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x03,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x03,  //1, 3, 2, 4, 5
+//							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x03,  //1, 3, 2, 4, 5
 //							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
 //							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
 //							   0x01, 0x00, 0x00, 0x00,  0x03, 0x00, 0x00, 0x00, 0x02, 0x04, 0x05,  //1, 3, 2, 4, 5
@@ -1536,6 +1559,9 @@ int read_Frame() {
 	//############Validation End #########################################################################
 
 	for (MsgIdx = 0; MsgIdx < NumNewByte; MsgIdx++) {
+	//############ Validation Begin################################################################
+		//rx_frameBuffer[MsgIdx] = buff[BuffIdx]; //RxBuffer[BuffIdx];
+	//############Validation End #########################################################################
 		rx_frameBuffer[MsgIdx] = RxBuffer[BuffIdx];
 		BuffIdx++;
 		if (BuffIdx >= UART_RX_BUFFER_SIZE) {
@@ -1591,11 +1617,15 @@ int Process_Input_Requests(  ){
 				BSP_MotorControl_WaitWhileActive(0);
 			}
 		}else{
-			if( rx_frame->gpioState != UNKNOW_DIR )
-				L6474_Board_SetDirectionGpio(0, rx_frame->gpioState);
 
-			if( rx_frame->Pwm1Period != 0 )
-				L6474_Board_Pwm1SetPeriod(rx_frame->Pwm1Period);
+			rotor_control_target_steps = rx_frame->control_target_steps;
+			apply_acceleration(rotor_control_target_steps, &target_velocity_prescaled, Tsample);
+
+//			if( rx_frame->gpioState != UNKNOW_DIR )
+//				L6474_Board_SetDirectionGpio(0, rx_frame->gpioState);
+//
+//			if( rx_frame->Pwm1Period != 0 )
+//				L6474_Board_Pwm1SetPeriod(rx_frame->Pwm1Period);
 			//else
 			//	BSP_MotorControl_GoTo(0,rx_frame->control_target_steps );
 		}
