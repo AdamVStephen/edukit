@@ -191,28 +191,20 @@ L6474_Init_t gL6474InitParams = {
 #pragma pack(push, 1)
  typedef struct
  {
- 	int32_t positionRotor;
+ 	int32_t rotor_position_steps;
  	uint32_t encoder_counter;
- 	uint32_t  Pwm1Counter;
-	uint8_t INPUT_break_Control_Loop;
-// 	uint32_t CYCCNT;
-// 	int32_t LOOP_BACK_rotor_control_target_steps;
-// 	uint32_t LOOP_BACK_L6474_Board_Pwm1Period;
-// 	uint8_t  LOOP_BACK_gpioState;
-// 	uint8_t  LOOP_BACK_break_Control_Loop;
-// 	uint8_t  LOOP_BACK_state;
 
  } DataFrameSend;
 #pragma pack(pop)
 
-#define DataFrameSend_SIZE  13
+#define DataFrameSend_SIZE  8
 
  #pragma pack(push, 1)
  typedef struct
  {
-	int32_t control_target_steps;
-	uint32_t Pwm1Period;
-	uint8_t gpioState;
+	int32_t motor_StepCount;
+	int32_t motor_Acceleration;
+	uint8_t motor_Direction;
 	uint8_t break_Control_Loop;
 	uint8_t state;
  } tt, *DataFrameReceive;
@@ -244,12 +236,9 @@ volatile uint16_t gLastError;
 /* Private function prototypes -----------------------------------------------*/
 void read_float(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, float *float_return);
 void Error_Handler(uint16_t error);
-void read_int(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, int * int_return);
-void read_char(uint32_t * RxBuffer_ReadIdx, uint32_t * RxBuffer_WriteIdx , uint32_t * readBytes, char * char_return);
-void select_mode_1(void);
 void set_default_configurations(void);
 void Main_StepClockHandler();
-void apply_acceleration(float  acc, float* target_velocity_prescaled, float t_sample);
+void apply_acceleration(float  acc);
 
 #define delayUS_ASM(us) do {\
 		asm volatile (	"MOV R0,%[loops]\n\t"\
@@ -286,7 +275,7 @@ void Main_StepClockHandler() {
 	}
 }
 
-void apply_acceleration(float acc, float * target_velocity_prescaled, float t_sample) {
+void apply_acceleration(float acc) {
 	/*
 	 *  Stepper motor acceleration, speed, direction and position control developed by Ryan Nemiroff
 	 */
@@ -301,7 +290,7 @@ void apply_acceleration(float acc, float * target_velocity_prescaled, float t_sa
 	apply_acc_start_time = DWT->CYCCNT;
 
 
-	motorDir_t old_dir = *target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
+	motorDir_t old_dir = target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
 
 	if (old_dir == FORWARD) {
 		if (acc > MAXIMUM_ACCELERATION) {
@@ -317,20 +306,20 @@ void apply_acceleration(float acc, float * target_velocity_prescaled, float t_sa
 		}	
 	}
 
-	*target_velocity_prescaled += L6474_Board_Pwm1PrescaleFreq(acc) * t_sample;
-	motorDir_t new_dir = *target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
+	target_velocity_prescaled += L6474_Board_Pwm1PrescaleFreq(acc) * Tsample;
+	motorDir_t new_dir = target_velocity_prescaled > 0 ? FORWARD : BACKWARD;
 
-	if (*target_velocity_prescaled > L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED)) {
-		*target_velocity_prescaled = L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED);
-	} else if (*target_velocity_prescaled < -L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED)) {
-		*target_velocity_prescaled = -L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED);
+	if (target_velocity_prescaled > L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED)) {
+		target_velocity_prescaled = L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED);
+	} else if (target_velocity_prescaled < -L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED)) {
+		target_velocity_prescaled = -L6474_Board_Pwm1PrescaleFreq(MAXIMUM_SPEED);
 	}
 
 	float speed_prescaled;
 	if (new_dir == FORWARD) {
-		speed_prescaled = *target_velocity_prescaled;
+		speed_prescaled = target_velocity_prescaled;
 	} else {
-		speed_prescaled = *target_velocity_prescaled * -1;
+		speed_prescaled = target_velocity_prescaled * -1;
 		if (speed_prescaled == 0) speed_prescaled = 0; // convert negative 0 to positive 0
 	}
 
@@ -378,22 +367,6 @@ void apply_acceleration(float acc, float * target_velocity_prescaled, float t_sa
 
 	desired_pwm_period = desired_pwm_period_local;
 
-}
-
-__STATIC_INLINE void DWT_Delay_us(volatile uint32_t microseconds)
-{
-	uint32_t clk_cycle_start = DWT->CYCCNT;
-
-	/* Go to number of cycles for system */
-	microseconds *= (RCC_HCLK_FREQ / 1000000);
-
-	/* Delay till end */
-	while ((DWT->CYCCNT - clk_cycle_start) < microseconds);
-}
-
-__STATIC_INLINE void DWT_Delay_until_cycle(volatile uint32_t cycle)
-{
-	while (DWT->CYCCNT < cycle);
 }
 
 UART_HandleTypeDef huart2;
@@ -650,17 +623,6 @@ int report_mode;
 int speed_scale;
 int speed_governor;
 
-/*
- * User selection mode values
- */
-
-int mode_quit;			// Initiate exit from control loop
-int mode_interactive;	// Enable continued terminal interactive user session
-int mode_index_prev, mode_index_command;
-int mode_transition_tick;
-int mode_transition_state;
-int transition_to_adaptive_mode;
-
 
 /* System timing variables */
 
@@ -764,9 +726,6 @@ void initialize(){
 	step_size = 0;
 	adjust_increment = 0.5;
 
-	/*Initialize adaptive mode state variables */
-	mode_transition_state = 0;
-	transition_to_adaptive_mode = 0;
 
 	/* STM32xx HAL library initialization */
 	HAL_Init();
@@ -895,7 +854,6 @@ void initialize_main_loop(){
 
 	INPUT_break_Control_Loop=0;
 
-	mode_interactive = 0;
 
 	/* Start timer for configuration command read loop */
 	tick_read_cycle_start = HAL_GetTick();
@@ -1032,7 +990,6 @@ int main(void) {
 		/*
 		 * Terminate motor control
 		 */
-
 		ret = rotor_position_read(&rotor_position_steps);
 
 		/*
@@ -1300,34 +1257,8 @@ void set_default_configurations(void){
 void Send_Output_Response(  ){
 	ret = rotor_position_read(&rotor_position_steps);
 
-//DataFrameSend_SIZE,DataFrameReceive_SIZE
-
-
-//############### validation (Uncomment lines 6296 to 6299)##############################
-//	tx_frame.positionRotor = 9; //rotor_position_steps;
-//	tx_frame.encoder_counter = 8;// __HAL_TIM_GET_COUNTER( (TIM_HandleTypeDef*) &htim3);
-//	tx_frame.Pwm1Counter = 7;//L6474_Board_Pwm1GetCounter();
-//	tx_frame.CYCCNT = 6;//DWT->CYCCNT;
-//	tx_frame.LOOP_BACK_rotor_control_target_steps = 5;
-//	tx_frame.LOOP_BACK_gpioState = 2;
-//	tx_frame.LOOP_BACK_L6474_Board_Pwm1Period = 1;
-//	tx_frame.LOOP_BACK_break_Control_Loop = 0;
-//	tx_frame.LOOP_BACK_state = 4;
-
-//#################VALIDATION ###########################
-
-	tx_frame.positionRotor = rotor_position_steps;
+	tx_frame.rotor_position_steps = rotor_position_steps;
 	tx_frame.encoder_counter =  __HAL_TIM_GET_COUNTER( (TIM_HandleTypeDef*) &htim3);
-	tx_frame.Pwm1Counter = L6474_Board_Pwm1GetCounter();
-	tx_frame.INPUT_break_Control_Loop = INPUT_break_Control_Loop;
-	INPUT_break_Control_Loop = 0;
-//	tx_frame.CYCCNT = DWT->CYCCNT;
-
-//	tx_frame.LOOP_BACK_rotor_control_target_steps = LOOP_BACK_rotor_control_target_steps;
-//	tx_frame.LOOP_BACK_gpioState = LOOP_BACK_gpioState;
-//	tx_frame.LOOP_BACK_L6474_Board_Pwm1Period = LOOP_BACK_L6474_Board_Pwm1Period;
-//	tx_frame.LOOP_BACK_break_Control_Loop = LOOP_BACK_break_Control_Loop;
-//	tx_frame.LOOP_BACK_state = LOOP_BACK_state;
 
 	memcpy(msg_cmd, &SYNC_BYTES, sizeof(SYNC_BYTES) );
 	memcpy(msg_cmd+sizeof(SYNC_BYTES), &tx_frame, DataFrameSend_SIZE );
@@ -1367,8 +1298,6 @@ void STATE_Pendulum_Stablisation_Postprocessing(){
 		chirp_dwell_cycle = 0;
 		pendulum_position_command_steps = 0;
 		impulse_start_index = 0;
-		mode_transition_state = 0;
-		transition_to_adaptive_mode = 0;
 		error_sum_prev = 0;
 		error_sum_filter_prev = 0;
 		adaptive_state = 4;
@@ -1596,6 +1525,12 @@ int Process_Input_Requests(  ){
 //		LOOP_BACK_state = rx_frame->state;
 
 
+		//if restarting
+		if( rx_frame->break_Control_Loop == 1){
+			return 0;
+		}
+
+
 		prev_state = state;
 		state = rx_frame->state;
 
@@ -1607,32 +1542,22 @@ int Process_Input_Requests(  ){
 		}
 
 		if( state == STATE_PENDULUM_STABLIZATION){//do nothing just delay and wait
+
 			HAL_Delay(INITIAL_PENDULUM_MOTION_TEST_DELAY);
+
 		}else if( state == STATE_SWING_UP){//swing up state
 
-			swing_up_direction = rx_frame->gpioState;
-			stage_amp = rx_frame->control_target_steps;
-			if( stage_amp > 0){
-				BSP_MotorControl_Move(0, swing_up_direction, stage_amp);
+			if( rx_frame->motor_StepCount > 0){
+				BSP_MotorControl_Move(0, rx_frame->motor_Direction, rx_frame->motor_StepCount);
 				BSP_MotorControl_WaitWhileActive(0);
 			}
-		}else{
 
-			rotor_control_target_steps = rx_frame->control_target_steps;
-			apply_acceleration(rotor_control_target_steps, &target_velocity_prescaled, Tsample);
+		}else{//control state
 
-//			if( rx_frame->gpioState != UNKNOW_DIR )
-//				L6474_Board_SetDirectionGpio(0, rx_frame->gpioState);
-//
-//			if( rx_frame->Pwm1Period != 0 )
-//				L6474_Board_Pwm1SetPeriod(rx_frame->Pwm1Period);
-			//else
-			//	BSP_MotorControl_GoTo(0,rx_frame->control_target_steps );
+			apply_acceleration( rx_frame->motor_Acceleration );
+
 		}
 
-		if( rx_frame->break_Control_Loop == 1){
-			return 0;
-		}
 
 
 

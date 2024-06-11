@@ -489,7 +489,7 @@ extern void select_mode_1(void);
 extern void user_configuration(void);
 extern int Delay_Pulse();
 extern void Main_StepClockHandler();
-extern void apply_acceleration(float  acc, float* target_velocity_prescaled, float t_sample);
+extern void apply_acceleration(float  acc);
 
 extern void user_prompt(void);
 extern void rotor_actuator_high_speed_test(void);
@@ -523,7 +523,6 @@ extern void select_mode_1(void);
 extern void user_configuration(void);
 extern int Delay_Pulse();
 extern void Main_StepClockHandler();
-extern void apply_acceleration(float  acc, float* target_velocity_prescaled, float t_sample);
 
 
 /*
